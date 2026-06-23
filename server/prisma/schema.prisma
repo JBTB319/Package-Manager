@@ -7,9 +7,37 @@ datasource db {
   url      = "file:./dev.db"
 }
 
+enum Site {
+   SITE_1
+   SITE_2
+}
+
+enum Status {
+   RECIEVED
+   NOTIFIED
+   PICK_UP
+   RETURN
+   DISCARDED
+}
+
+model Recipient {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  site      Site
+  packages  Package[]
+}
+
 model Package {
   id        Int      @id @default(autoincrement())
+  
   name      String
   version   String
   createdAt DateTime @default(now())
+}
+
+model Receiptant {
+   name     String
+   email    String
+   createdAt DateTime @default(now())
 }
