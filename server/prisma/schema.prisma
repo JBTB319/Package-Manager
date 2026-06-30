@@ -7,33 +7,22 @@ datasource db {
   url      = "file:./dev.db"
 }
 
-enum Site {
-   SITE_1
-   SITE_2
-}
-
-enum Courier {
-  USPS
-  UPS
-  FEDEX
-  DHL
-  AMAZON
-  OTHER
-}
-
-enum Status {
-   RECEIVED
-   NOTIFIED
-   PICK_UP
-   RETURN
-   DISCARDED
+model User {
+  id        Int       @id @default(autoincrement())
+  name      String
+  email     String    @unique
+  packages  Package[]
+  createdAt DateTime  @default(now())
 }
 
 model Recipient {
   id        Int       @id @default(autoincrement())
   name      String
   email     String    @unique
-  site      Site      
+  site      String
+  alias     String?
+  location  String?
+  type      String    @default("Internal")
   packages  Package[]
   createdAt DateTime  @default(now())
 }
@@ -42,30 +31,28 @@ model Package {
   id          Int      @id @default(autoincrement())
   trackingNum String?
   description String?
-  location    String   // ← add this
-  dimensions  String?  // ← add this
-  notes       String?  // ← add this
+  location    String
+  dimensions  String?
+  notes       String?
 
-  recipient   Recipient? @relation(fields: [recipientId], references: [id])
-  recipientId Int?
+  recipient    Recipient? @relation(fields: [recipientId], references: [id])
+  recipientId  Int?
 
-  loggedInBy  User     @relation(fields: [loggedInById], references: [id])
+  loggedInBy   User @relation(fields: [loggedInById], references: [id])
   loggedInById Int
 
-  site        Site
-  courier     Courier
+  site    String
+  courier String
 
-  status      Status   @default(RECEIVED)  // ← fix enum name
-  receivedAt  DateTime @default(now())
-  notifiedAt  DateTime?
-  pickedUpAt  DateTime?
+  status     String   @default("RECEIVED")
+  receivedAt DateTime @default(now())
+  notifiedAt DateTime?
+  pickedUpAt DateTime?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([recipientId])
   @@index([loggedInById])
 }
-
-

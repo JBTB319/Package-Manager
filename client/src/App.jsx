@@ -1,11 +1,13 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Package, Users, Building2, ChevronsUpDown, PanelLeft, Plus,
-  Table2, Search, ArrowUpDown, X, Pencil, Trash2, Check,
+  Table2, Search, ArrowUpDown, ArrowUp, ArrowDown, X, Pencil, Trash2, Check,
   User, Hash, Tag, Tags, Mail, Link2, MapPin, Image, Share2, Truck,
   LogIn, LogOut, Ruler, UserCheck, UserMinus, Inbox, Box,
   ChevronLeft, ChevronRight, ChevronDown,
 } from "lucide-react";
+import { getPackages, createPackage, updatePackage, deletePackage, checkoutPackage } from "./services/packageService";
+import { getRecipients, createRecipient, updateRecipient, deleteRecipient } from "./services/recipientService";
 
 const TEAL = "#15876b";
 const TEAL_DARK = "#0f6e56";
@@ -14,12 +16,49 @@ const GOLD = "#b3a369";
 const NAVY = "#003057";
 const SITE_NAME = "GTHR Package Manager";
 const SITES = ["Site 1", "Site 2"];
-const CURRENT_USER = "Bibek Bhattarai"; // hardcoded until auth lands
+const CURRENT_USER = "Bibek Bhattarai";
 
-const seedRecipients = [
-  { id: 1, name: "Bibek Bhattarai", recipId: "", alias: "", email: "bbhattarai6@gatech.edu", site: "Site 1", type: "Internal", location: "Room 5" },
-  { id: 2, name: "Bibek1 Bhattarai1", recipId: "", alias: "Bb", email: "bibekbhattarai5th@gmail.com", site: "Site 2", type: "Internal", location: "Here" },
-];
+// Mapping between display values and API enum strings
+const SITE_TO_API = { "Site 1": "SITE_1", "Site 2": "SITE_2" };
+const SITE_FROM_API = { "SITE_1": "Site 1", "SITE_2": "Site 2" };
+const COURIER_TO_API = { "USPS": "USPS", "UPS": "UPS", "FedEx": "FEDEX", "DHL": "DHL", "Amazon": "AMAZON", "Other": "OTHER" };
+const COURIER_FROM_API = { "USPS": "USPS", "UPS": "UPS", "FEDEX": "FedEx", "DHL": "DHL", "AMAZON": "Amazon", "OTHER": "Other" };
+
+function fmtDate(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function apiPkgToUI(pkg) {
+  return {
+    id: pkg.id,
+    recipient: pkg.recipient?.name ?? "",
+    identifier: `PKG-${pkg.id}`,
+    site: SITE_FROM_API[pkg.site] ?? pkg.site,
+    courier: COURIER_FROM_API[pkg.courier] ?? pkg.courier,
+    tracking: pkg.trackingNum ?? "",
+    checkedIn: fmtDate(pkg.receivedAt),
+    checkedOut: pkg.pickedUpAt ? fmtDate(pkg.pickedUpAt) : "",
+    dimensions: pkg.dimensions ?? "",
+    location: pkg.location ?? "",
+    tags: [],
+    loggedInBy: pkg.loggedInBy?.name ?? "",
+    loggedOutBy: "",
+  };
+}
+
+function apiRecipToUI(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    recipId: String(r.id),
+    alias: r.alias ?? "",
+    email: r.email,
+    site: SITE_FROM_API[r.site] ?? r.site,
+    type: r.type ?? "Internal",
+    location: r.location ?? "",
+  };
+}
 
 const PARCEL_SORT_FIELDS = [
   { key: "recipient", label: "Recipient", icon: User },
@@ -43,9 +82,6 @@ const RECIPIENT_SORT_FIELDS = [
   { key: "type", label: "Type", icon: Link2 },
   { key: "location", label: "Location", icon: MapPin },
 ];
-
-const now = () =>
-  new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 function NavItem({ icon: Icon, label, active, onClick }) {
   return (
@@ -73,12 +109,25 @@ function ToolbarButton({ icon: Icon, label, badge, active, onClick }) {
   );
 }
 
-function Th({ icon: Icon, label, w }) {
+function Th({ icon: Icon, label, w, sortKey, sortField, sortDir, onSort }) {
+  const active = sortKey && sortField === sortKey;
+  const sortable = !!sortKey;
   return (
-    <th className="whitespace-nowrap border-r border-gray-100 px-4 py-2.5 text-left font-medium text-gray-500" style={w ? { minWidth: w } : undefined}>
+    <th
+      onClick={() => sortable && onSort(sortKey)}
+      className={`whitespace-nowrap border-r border-gray-100 px-4 py-2.5 text-left font-medium text-gray-500${sortable ? " cursor-pointer select-none hover:bg-gray-100" : ""}`}
+      style={w ? { minWidth: w } : undefined}
+    >
       <div className="flex items-center gap-1.5">
         <Icon size={15} strokeWidth={1.75} className="text-gray-400" />
         {label}
+        {active
+          ? sortDir === "asc"
+            ? <ArrowUp size={13} strokeWidth={2} style={{ color: TEAL }} />
+            : <ArrowDown size={13} strokeWidth={2} style={{ color: TEAL }} />
+          : sortable
+            ? <ArrowUpDown size={12} strokeWidth={1.5} className="text-gray-300" />
+            : null}
       </div>
     </th>
   );
@@ -144,7 +193,7 @@ function SortMenu({ fields, sortField, sortDir, pickSort, toggleDir, search, set
       <div className="fixed inset-0 z-20" onClick={onClose} />
       <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded-xl border border-gray-200 bg-white p-2 shadow-xl">
         <button onClick={toggleDir} className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50">
-          {sortDir === "desc" ? "Sort Descending" : "Sort Ascending"}
+          {sortDir === "asc" ? "Sort Descending" : "Sort Ascending"}
           <ArrowUpDown size={15} className="text-gray-400" />
         </button>
         <div className="my-1.5 flex items-center gap-2 rounded-lg bg-gray-100 px-2.5 py-1.5">
@@ -153,7 +202,7 @@ function SortMenu({ fields, sortField, sortDir, pickSort, toggleDir, search, set
         </div>
         <div className="max-h-64 overflow-auto">
           {list.map((f) => (
-            <button key={f.key} onClick={() => pickSort(f.key)} className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm hover:bg-gray-50">
+            <button key={f.key} onClick={() => { pickSort(f.key); onClose(); }} className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm hover:bg-gray-50">
               <span className="flex items-center gap-2.5 text-gray-700"><f.icon size={16} className="text-gray-400" />{f.label}</span>
               {sortField === f.key && <Check size={16} style={{ color: TEAL }} />}
             </button>
@@ -235,13 +284,15 @@ function Footer({ count }) {
   );
 }
 
-const emptyR = { name: "", alias: "", email: "", type: "Internal", location: "" };
+const emptyR = { name: "", alias: "", email: "", site: SITES[0], type: "Internal", location: "" };
 const emptyP = { recipient: "", site: "", identifier: "", courier: "USPS", tracking: "", dimensions: "", location: "", tags: "" };
 
 export default function App() {
   const [page, setPage] = useState("parcels");
-  const [recipients, setRecipients] = useState(seedRecipients);
+  const [recipients, setRecipients] = useState([]);
   const [parcels, setParcels] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [selected, setSelected] = useState(new Set());
@@ -256,6 +307,21 @@ export default function App() {
   const [sortOpen, setSortOpen] = useState(false);
   const [sortSearch, setSortSearch] = useState("");
 
+  useEffect(() => {
+    async function load() {
+      try {
+        const [pkgs, recips] = await Promise.all([getPackages(), getRecipients()]);
+        setParcels(pkgs.map(apiPkgToUI));
+        setRecipients(recips.map(apiRecipToUI));
+      } catch (e) {
+        setError("Could not connect to server. Make sure the backend is running on port 4000.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
   const isParcels = page === "parcels";
 
   const switchPage = (p) => {
@@ -267,13 +333,13 @@ export default function App() {
   const filteredRecipients = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q || isParcels) return recipients;
-    return recipients.filter((r) => [r.name, r.alias, r.email, r.location].some((v) => v.toLowerCase().includes(q)));
+    return recipients.filter((r) => [r.name, r.alias, r.email, r.location].some((v) => (v || "").toLowerCase().includes(q)));
   }, [recipients, query, isParcels]);
 
   const filteredParcels = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q || !isParcels) return parcels;
-    return parcels.filter((p) => [p.recipient, p.identifier, p.courier, p.tracking, p.location].some((v) => (v || "").toLowerCase().includes(q)));
+    return parcels.filter((p) => [p.recipient, p.identifier, p.courier, p.tracking, p.location, p.loggedInBy].some((v) => (v || "").toLowerCase().includes(q)));
   }, [parcels, query, isParcels]);
 
   const sorted = useMemo(() => {
@@ -289,6 +355,22 @@ export default function App() {
 
   const pickSort = (key) => setSortField((f) => (f === key ? null : key));
   const toggleDir = () => setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+
+  const handleHeaderSort = (key) => {
+    if (sortField === key) {
+      if (sortDir === "asc") {
+        setSortDir("desc");
+      } else {
+        setSortField(null);
+        setSortDir("asc");
+      }
+    } else {
+      setSortField(key);
+      setSortDir("asc");
+    }
+  };
+
+  const thSort = { sortField, sortDir, onSort: handleHeaderSort };
 
   const toggleRow = (id) => {
     setConfirming(false);
@@ -310,47 +392,87 @@ export default function App() {
       setModal({ type: "parcel", mode: "edit" });
     } else {
       const r = recipients.find((x) => x.id === id);
-      setRForm({ name: r.name, alias: r.alias, email: r.email, type: r.type, location: r.location });
+      setRForm({ name: r.name, alias: r.alias, email: r.email, site: r.site, type: r.type, location: r.location });
       setEditingId(id);
       setModal({ type: "recipient", mode: "edit" });
     }
   };
 
-  const deleteSelected = () => {
-    if (isParcels) setParcels((prev) => prev.filter((p) => !selected.has(p.id)));
-    else setRecipients((prev) => prev.filter((r) => !selected.has(r.id)));
-    clearSelection();
+  const deleteSelected = async () => {
+    try {
+      if (isParcels) {
+        await Promise.all([...selected].map((id) => deletePackage(id)));
+        setParcels((prev) => prev.filter((p) => !selected.has(p.id)));
+      } else {
+        await Promise.all([...selected].map((id) => deleteRecipient(id)));
+        setRecipients((prev) => prev.filter((r) => !selected.has(r.id)));
+      }
+      clearSelection();
+    } catch (e) {
+      setError(e.message);
+    }
   };
 
-  const submitRecipient = () => {
+  const submitRecipient = async () => {
     if (!rForm.name.trim()) return;
-    if (modal.mode === "add") setRecipients((prev) => [...prev, { id: Date.now(), recipId: "", site: SITES[0], ...rForm }]);
-    else setRecipients((prev) => prev.map((r) => r.id === editingId ? { ...r, ...rForm } : r));
-    setModal(null); clearSelection();
+    try {
+      const payload = { ...rForm, site: SITE_TO_API[rForm.site] ?? rForm.site };
+      if (modal.mode === "add") {
+        const created = await createRecipient(payload);
+        setRecipients((prev) => [...prev, apiRecipToUI(created)]);
+      } else {
+        const updated = await updateRecipient(editingId, payload);
+        setRecipients((prev) => prev.map((r) => r.id === editingId ? apiRecipToUI(updated) : r));
+      }
+      setModal(null); clearSelection();
+    } catch (e) {
+      setError(e.message);
+    }
   };
 
-  const submitParcel = () => {
+  const submitParcel = async () => {
     const errs = {};
     if (!pForm.recipient) errs.recipient = true;
     if (!pForm.site) errs.site = true;
+    if (!pForm.location) errs.location = true;
     if (Object.keys(errs).length) { setPErrors(errs); return; }
-    const tags = pForm.tags ? pForm.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
-    if (modal.mode === "add") {
-      setParcels((prev) => [...prev, {
-        id: Date.now(), recipient: pForm.recipient, identifier: pForm.identifier || `PKG-${prev.length + 1}`,
-        site: pForm.site, courier: pForm.courier, tracking: pForm.tracking, checkedIn: now(), checkedOut: "",
-        dimensions: pForm.dimensions, location: pForm.location, tags, loggedInBy: CURRENT_USER, loggedOutBy: "",
-      }]);
-    } else {
-      setParcels((prev) => prev.map((p) => p.id === editingId
-        ? { ...p, recipient: pForm.recipient, site: pForm.site, identifier: pForm.identifier, courier: pForm.courier, tracking: pForm.tracking, dimensions: pForm.dimensions, location: pForm.location, tags }
-        : p));
+
+    const recipientId = recipients.find((r) => r.name === pForm.recipient)?.id;
+    if (!recipientId) { setPErrors({ recipient: true }); return; }
+
+    const payload = {
+      recipientId,
+      site:       SITE_TO_API[pForm.site] ?? pForm.site,
+      courier:    COURIER_TO_API[pForm.courier] ?? pForm.courier,
+      trackingNum: pForm.tracking  || null,
+      dimensions:  pForm.dimensions || null,
+      location:    pForm.location,
+      notes:       null,
+    };
+
+    try {
+      if (modal.mode === "add") {
+        const created = await createPackage(payload);
+        setParcels((prev) => [...prev, apiPkgToUI(created)]);
+      } else {
+        const updated = await updatePackage(editingId, payload);
+        setParcels((prev) => prev.map((p) => p.id === editingId ? apiPkgToUI(updated) : p));
+      }
+      setPErrors({});
+      setModal(null); clearSelection();
+    } catch (e) {
+      setError(e.message);
     }
-    setPErrors({});
-    setModal(null); clearSelection();
   };
 
-  const checkOut = (id) => setParcels((prev) => prev.map((p) => p.id === id ? { ...p, checkedOut: now(), loggedOutBy: CURRENT_USER } : p));
+  const checkOut = async (id) => {
+    try {
+      const updated = await checkoutPackage(id);
+      setParcels((prev) => prev.map((p) => p.id === id ? apiPkgToUI(updated) : p));
+    } catch (e) {
+      setError(e.message);
+    }
+  };
 
   const visibleCount = sorted.length;
   const totalCount = isParcels ? parcels.length : recipients.length;
@@ -368,6 +490,13 @@ export default function App() {
           pickSort={pickSort} toggleDir={toggleDir} sortSearch={sortSearch} setSortSearch={setSortSearch}
         />
 
+        {error && (
+          <div className="mx-8 my-1 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="ml-4 text-red-400 hover:text-red-700"><X size={14} /></button>
+          </div>
+        )}
+
         {selected.size > 0 ? (
           <ActionBar count={selected.size} onEdit={openEdit} onDelete={deleteSelected} onClear={clearSelection} confirming={confirming} setConfirming={setConfirming} />
         ) : (
@@ -378,7 +507,9 @@ export default function App() {
         )}
 
         <div className="flex-1 overflow-auto px-8 pt-2">
-          {isParcels ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-28 text-gray-400 text-sm">Loading…</div>
+          ) : isParcels ? (
             <table className="w-full border-collapse text-sm" style={{ minWidth: 1560 }}>
               <thead>
                 <tr className="border-y border-gray-200 bg-gray-50">
@@ -389,18 +520,18 @@ export default function App() {
                       className="h-4 w-4 rounded border-gray-300" />
                   </th>
                   <th className="w-12 border-r border-gray-100 px-4 py-2.5"><Image size={15} className="text-gray-400" /></th>
-                  <Th icon={User} label="Recipient" w={160} />
-                  <Th icon={Share2} label="Identifier" w={140} />
-                  <Th icon={Building2} label="Site" w={180} />
-                  <Th icon={Truck} label="Courier" w={120} />
-                  <Th icon={Hash} label="Tracking Number" w={180} />
-                  <Th icon={LogIn} label="Checked-in" w={150} />
-                  <Th icon={LogOut} label="Checked-out" w={150} />
-                  <Th icon={Ruler} label="Dimensions" w={130} />
-                  <Th icon={MapPin} label="Location" w={120} />
+                  <Th icon={User} label="Recipient" w={160} sortKey="recipient" {...thSort} />
+                  <Th icon={Share2} label="Identifier" w={140} sortKey="identifier" {...thSort} />
+                  <Th icon={Building2} label="Site" w={180} sortKey="site" {...thSort} />
+                  <Th icon={Truck} label="Courier" w={120} sortKey="courier" {...thSort} />
+                  <Th icon={Hash} label="Tracking Number" w={180} sortKey="tracking" {...thSort} />
+                  <Th icon={LogIn} label="Checked-in" w={150} sortKey="checkedIn" {...thSort} />
+                  <Th icon={LogOut} label="Checked-out" w={150} sortKey="checkedOut" {...thSort} />
+                  <Th icon={Ruler} label="Dimensions" w={130} sortKey="dimensions" {...thSort} />
+                  <Th icon={MapPin} label="Location" w={120} sortKey="location" {...thSort} />
                   <Th icon={Tags} label="Tags" w={140} />
-                  <Th icon={UserCheck} label="Logged in by" w={150} />
-                  <Th icon={UserMinus} label="Logged out by" w={150} />
+                  <Th icon={UserCheck} label="Logged in by" w={150} sortKey="loggedInBy" {...thSort} />
+                  <Th icon={UserMinus} label="Logged out by" w={150} sortKey="loggedOutBy" {...thSort} />
                 </tr>
               </thead>
               <tbody>
@@ -458,13 +589,13 @@ export default function App() {
                       onChange={() => setSelected((prev) => { const n = new Set(prev); const all = sorted.every((r) => n.has(r.id)); sorted.forEach((r) => all ? n.delete(r.id) : n.add(r.id)); return n; })}
                       className="h-4 w-4 rounded border-gray-300" />
                   </th>
-                  <Th icon={User} label="Name" />
-                  <Th icon={Hash} label="ID" />
-                  <Th icon={Tag} label="Alias" />
-                  <Th icon={Mail} label="Email" />
-                  <Th icon={Building2} label="Site" />
-                  <Th icon={Link2} label="Type" />
-                  <Th icon={MapPin} label="Location" />
+                  <Th icon={User} label="Name" sortKey="name" {...thSort} />
+                  <Th icon={Hash} label="ID" sortKey="recipId" {...thSort} />
+                  <Th icon={Tag} label="Alias" sortKey="alias" {...thSort} />
+                  <Th icon={Mail} label="Email" sortKey="email" {...thSort} />
+                  <Th icon={Building2} label="Site" sortKey="site" {...thSort} />
+                  <Th icon={Link2} label="Type" sortKey="type" {...thSort} />
+                  <Th icon={MapPin} label="Location" sortKey="location" {...thSort} />
                 </tr>
               </thead>
               <tbody>
@@ -501,9 +632,10 @@ export default function App() {
 
         {modal?.type === "recipient" && (
           <Modal title={modal.mode === "add" ? "Add Recipient" : "Edit Recipient"} onClose={() => setModal(null)} onSubmit={submitRecipient} submitLabel={modal.mode === "add" ? "Add Recipient" : "Save changes"}>
-            <Field label="Name" value={rForm.name} onChange={(v) => setRForm((s) => ({ ...s, name: v }))} ph="Full name" />
+            <Field label="Name" required value={rForm.name} onChange={(v) => setRForm((s) => ({ ...s, name: v }))} ph="Full name" />
             <Field label="Alias" value={rForm.alias} onChange={(v) => setRForm((s) => ({ ...s, alias: v }))} ph="Short name (optional)" />
-            <Field label="Email" value={rForm.email} onChange={(v) => setRForm((s) => ({ ...s, email: v }))} ph="name@gatech.edu" />
+            <Field label="Email" required value={rForm.email} onChange={(v) => setRForm((s) => ({ ...s, email: v }))} ph="name@gatech.edu" />
+            <SelectField label="Site" required value={rForm.site} onChange={(v) => setRForm((s) => ({ ...s, site: v }))} options={SITES} />
             <Field label="Location" value={rForm.location} onChange={(v) => setRForm((s) => ({ ...s, location: v }))} ph="e.g. Room 5" />
             <SelectField label="Type" value={rForm.type} onChange={(v) => setRForm((s) => ({ ...s, type: v }))} options={["Internal", "External"]} />
           </Modal>
@@ -513,12 +645,10 @@ export default function App() {
           <Modal title={modal.mode === "add" ? "Add Parcel" : "Edit Parcel"} onClose={() => setModal(null)} onSubmit={submitParcel} submitLabel={modal.mode === "add" ? "Add Parcel" : "Save changes"}>
             <SelectField label="Recipient" required error={pErrors.recipient} value={pForm.recipient} onChange={(v) => { setPForm((s) => ({ ...s, recipient: v })); setPErrors((e) => ({ ...e, recipient: false })); }} options={["", ...recipients.map((r) => r.name)]} placeholder="Select recipient" />
             <SelectField label="Site" required error={pErrors.site} value={pForm.site} onChange={(v) => { setPForm((s) => ({ ...s, site: v })); setPErrors((e) => ({ ...e, site: false })); }} options={["", ...SITES]} placeholder="Select site" />
-            <Field label="Identifier" value={pForm.identifier} onChange={(v) => setPForm((s) => ({ ...s, identifier: v }))} ph="Auto-generated if blank" />
             <SelectField label="Courier" value={pForm.courier} onChange={(v) => setPForm((s) => ({ ...s, courier: v }))} options={["USPS", "UPS", "FedEx", "DHL", "Amazon", "Other"]} />
             <Field label="Tracking Number" value={pForm.tracking} onChange={(v) => setPForm((s) => ({ ...s, tracking: v }))} ph="1Z999..." />
+            <Field label="Location" required error={pErrors.location} value={pForm.location} onChange={(v) => { setPForm((s) => ({ ...s, location: v })); setPErrors((e) => ({ ...e, location: false })); }} ph="e.g. Shelf B3" />
             <Field label="Dimensions" value={pForm.dimensions} onChange={(v) => setPForm((s) => ({ ...s, dimensions: v }))} ph="12 x 8 x 4 in" />
-            <Field label="Location" value={pForm.location} onChange={(v) => setPForm((s) => ({ ...s, location: v }))} ph="e.g. Shelf B3" />
-            <Field label="Tags" value={pForm.tags} onChange={(v) => setPForm((s) => ({ ...s, tags: v }))} ph="fragile, perishable" />
           </Modal>
         )}
       </main>

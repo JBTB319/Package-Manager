@@ -1,64 +1,100 @@
 const prisma = require('../db');
 
+const INCLUDE = {
+  recipient: true,
+  loggedInBy: { select: { id: true, name: true } },
+};
+
+// Placeholder until auth lands — will be the authenticated user's id
+const CURRENT_USER_ID = 1;
+
 async function getPackages(req, res) {
-  const packages = await prisma.package.findMany({ orderBy: { id: 'asc' } });
+  const packages = await prisma.package.findMany({
+    orderBy: { id: 'asc' },
+    include: INCLUDE,
+  });
   res.json(packages);
 }
 
-// Until auth is wired up, stamp every check-in with a placeholder user.
-// Replace with the authenticated user's id (e.g. req.session.user.id) later.
-const CURRENT_USER_ID = 1;
-
 async function createPackage(req, res) {
-  const {
-    recipientId,
-    site,          // enum value: "SITE_1" | "SITE_2" | "SITE_3"
-    courier,       // enum value: "USPS" | "UPS" | "FEDEX" | "DHL" | "AMAZON" | "OTHER"
-    trackingNum,
-    dimensions,
-    location,
-    notes
-  } = req.body;
+  const { recipientId, site, courier, trackingNum, dimensions, location, notes } = req.body;
 
-  // These four are non-nullable in the schema, so guard them up front.
   if (!recipientId || !site || !courier || !location) {
-    return res.status(400).json({
-      error: 'recipientId, site, courier, and location are required.',
-    });
+    return res.status(400).json({ error: 'recipientId, site, courier, and location are required.' });
   }
 
   try {
-    const newPackage = await prisma.package.create({
+    const pkg = await prisma.package.create({
       data: {
-        recipient:  { connect: { id: Number(recipientId) } },
-        loggedInBy: { connect: { id: CURRENT_USER_ID } },
+        recipient:   { connect: { id: Number(recipientId) } },
+        loggedInBy:  { connect: { id: CURRENT_USER_ID } },
         site,
         courier,
         location,
         trackingNum: trackingNum || null,
-        dimensions:  dimensions || null,
-        notes:       notes || null,
-        tags:        Array.isArray(tags) ? tags : [],
-        // status defaults to RECEIVED and checkedInAt defaults to now() in the schema
+        dimensions:  dimensions  || null,
+        notes:       notes       || null,
       },
-      include: {
-        recipient: true,
-        loggedInBy: true,
-      },
+      include: INCLUDE,
     });
-
-    return res.status(201).json(newPackage);
-  } catch (error) {
-    console.error('Failed to create package', error);
-    // Prisma throws P2025 when a connect target doesn't exist (e.g. bad recipientId)
-    if (error.code === 'P2025') {
-      return res.status(400).json({ error: 'Recipient not found.' });
-    }
+    return res.status(201).json(pkg);
+  } catch (err) {
+    console.error('Failed to create package', err);
+    if (err.code === 'P2025') return res.status(400).json({ error: 'Recipient not found.' });
     return res.status(500).json({ error: 'Failed to create package.' });
   }
 }
 
-module.exports = {
-  getPackages,
-  createPackage,
-};
+async function updatePackage(req, res) {
+  const id = Number(req.params.id);
+  const { recipientId, site, courier, trackingNum, dimensions, location, notes } = req.body;
+
+  try {
+    const pkg = await prisma.package.update({
+      where: { id },
+      data: {
+        ...(recipientId !== undefined && { recipient: { connect: { id: Number(recipientId) } } }),
+        ...(site        !== undefined && { site }),
+        ...(courier     !== undefined && { courier }),
+        ...(location    !== undefined && { location }),
+        ...(trackingNum !== undefined && { trackingNum: trackingNum || null }),
+        ...(dimensions  !== undefined && { dimensions:  dimensions  || null }),
+        ...(notes       !== undefined && { notes:       notes       || null }),
+      },
+      include: INCLUDE,
+    });
+    return res.json(pkg);
+  } catch (err) {
+    console.error('Failed to update package', err);
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Package not found.' });
+    return res.status(500).json({ error: 'Failed to update package.' });
+  }
+}
+
+async function deletePackage(req, res) {
+  const id = Number(req.params.id);
+  try {
+    await prisma.package.delete({ where: { id } });
+    return res.status(204).end();
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Package not found.' });
+    return res.status(500).json({ error: 'Failed to delete package.' });
+  }
+}
+
+async function checkoutPackage(req, res) {
+  const id = Number(req.params.id);
+  try {
+    const pkg = await prisma.package.update({
+      where: { id },
+      data: { status: 'PICK_UP', pickedUpAt: new Date() },
+      include: INCLUDE,
+    });
+    return res.json(pkg);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Package not found.' });
+    return res.status(500).json({ error: 'Failed to check out package.' });
+  }
+}
+
+module.exports = { getPackages, createPackage, updatePackage, deletePackage, checkoutPackage };

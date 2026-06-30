@@ -1,4 +1,4 @@
-const BASE = 'http://localhost:4000/packages';
+const BASE = 'http://localhost:4000/recipients';
 
 async function handleResponse(res) {
   if (res.status === 204) return null;
@@ -7,11 +7,11 @@ async function handleResponse(res) {
   return data;
 }
 
-export async function getPackages() {
+export async function getRecipients() {
   return handleResponse(await fetch(BASE));
 }
 
-export async function createPackage(data) {
+export async function createRecipient(data) {
   return handleResponse(await fetch(BASE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -19,7 +19,7 @@ export async function createPackage(data) {
   }));
 }
 
-export async function updatePackage(id, data) {
+export async function updateRecipient(id, data) {
   return handleResponse(await fetch(`${BASE}/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -27,10 +27,6 @@ export async function updatePackage(id, data) {
   }));
 }
 
-export async function deletePackage(id) {
+export async function deleteRecipient(id) {
   return handleResponse(await fetch(`${BASE}/${id}`, { method: 'DELETE' }));
-}
-
-export async function checkoutPackage(id) {
-  return handleResponse(await fetch(`${BASE}/${id}/checkout`, { method: 'PATCH' }));
 }
